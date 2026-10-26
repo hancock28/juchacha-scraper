@@ -1,0 +1,17 @@
+# 忽略真实登录态
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# macOS
+.DS_Store
+._*
+
+# 运行时产物（保留 data/jcc 下的示例数据，忽略重复生成的库与临时文件）
+*.log
+*.tmp
+data/*.db

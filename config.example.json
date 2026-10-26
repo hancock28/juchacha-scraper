@@ -1,0 +1,7 @@
+{
+  "userKey": "在这里填 userKey（浏览器登录后 App.userKey）",
+  "cookie": "SESSION=xxxx; tokenglobal=yyyy",
+  "outDir": "data",
+  "rate": 1.5,
+  "note": "userKey 与 cookie 都属于你的账号登录态，会过期；更新后直接重跑即可"
+}
