@@ -24,6 +24,8 @@ juchacha-scraper/
 ## 快速开始（免登录，直接出数据）
 
 ```bash
+git clone https://github.com/hancock28/juchacha-scraper.git
+cd juchacha-scraper
 pip3 install -r requirements.txt
 python3 jcc_rank.py                # 抓最新日期的三个榜
 python3 jcc_rank.py --day 2026-10-25   # 指定日期
