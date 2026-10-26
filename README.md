@@ -300,3 +300,96 @@ JCC_TOKEN=xxx python3 jcc_detail.py
 | `listDays` | 连续霸榜天数 |
 | `playletOnlineTime` / `releaseStartDate` | 上线时间 |
 | `honor_days` / `honor_ranks` / `honor_history` | 上榜历史 |
+
+---
+
+## 10. 免登录拿详情：红果站内页（jcc_hongguo.py）
+
+**关键发现**：榜单里的 `playletNativeId` 就是红果的 `series_id`。
+红果详情页是 SSR，`seriesDetail` 直接写在 HTML 里——**不用登录、不用签名、不用 token**。
+
+```
+https://hongguoduanju.com/detail?series_id=<playletNativeId>
+```
+
+```bash
+python3 jcc_hongguo.py                 # 三榜 + 红果详情（约 8 分钟 / 63 列）
+python3 jcc_hongguo.py --workers 8 --limit 10   # 调试
+```
+
+输出 `data/jcc/剧查查三榜_红果详情_<day>.xlsx`，多一个「红果详情」sheet。
+
+### 10.1 能拿到的字段（`seriesDetail`）
+
+| 字段 | 说明 | 实测覆盖 |
+|---|---|---|
+| `hg_name` | 红果剧名 | 52/52 |
+| `hg_intro` | **完整简介**（几百字） | 52/52 |
+| `hg_tags` | 题材（玄幻/系统/异界…） | 52/52 |
+| `hg_episode_text` | “全1000集” | 52/52 |
+| `hg_episode_cnt` | 总集数 | 52/52 |
+| `hg_accessible_episode` | 免费可看集数 | 52/52 |
+| `hg_status` | 连载中 / 已完结 | 52/52 |
+| `hg_vid_count` / `hg_vid_head` | 分集 vid 数量 / 前 5 个（可直接拼播放） | 52/52 |
+| `hg_celebrities` / `hg_celebrity_n` | 演员表 | 部分剧为空 |
+| `hg_first_visible` / `hg_pay_type` / `hg_cover` | 上线时间戳 / 付费类型 / 封面 | 52/52 |
+
+### 10.2 两个坑
+
+1. **DNS 被劫持**：本机若开代理（TUN/fake-ip），`hongguoduanju.com` 会解析成 `198.18.x.x` 直接连不上。
+   脚本先走 DoH（阿里 / Cloudflare）拿真实 A 记录，再 patch `socket.getaddrinfo`，保留 SNI 为原域名。
+   手工验证：`curl --resolve hongguoduanju.com:443:<真实IP> https://hongguoduanju.com/detail?series_id=…`
+2. **流式截断**：页面约 800KB，脚本边收边找 `"seriesDetail":`，凑够 `vid_list` 就断开；
+   服务器偶发 `ChunkedEncodingError`，已做「已收数据照样解析 + 重试」。
+
+### 10.3 覆盖边界（实测 2026-10-26）
+
+| 榜单 | 可补详情 | 原因 |
+|---|---|---|
+| 红果漫剧榜 | **49 / 60** | `playletNativeId` 齐全；11 部是网络抖动/红果无此剧 |
+| 3D动态漫榜 | 3 / 30 | 抖音原生榜，DataEye **不给** `playletNativeId` |
+| AI真人榜 | 0 / 30 | 同上 |
+
+抖音原生两榜要补详情，只有两条路：带小程序 token 调 DataEye 详情接口，或自己做抖音 `a_bogus` 签名。
+
+## 11. 开源方案参考
+
+红果系已经有一批开源客户端把接口逆向好了，不用重复造轮子：
+
+| 项目 | 星 | 能复用什么 |
+|---|---|---|
+| [N3urda/hongguoTV](https://github.com/N3urda/hongguoTV) | 797 | `server/provider.mjs` + `server/vendor/hongguo.cjs`：红果推荐/搜索/详情/选集/播放解密，**本文档的 seriesDetail 解析就出自这里** |
+| [yangbin1322/hongguo-player](https://github.com/yangbin1322/hongguo-player) | 1310 | 红果桌面客户端，接口行为参考 |
+| [zhoufuweigg/guoapp](https://github.com/zhoufuweigg/guoapp) | 1439 | 红果客户端源码，多端实现 |
+| [KEJIYUNB/hongguo](https://github.com/KEJIYUNB/hongguo) | 136 | 红果模块化封装 |
+| [jackherex/duanjuzhijia-down-tv](https://github.com/jackherex/duanjuzhijia-down-tv) | 115 | 红果 TV 端播放器，选集/播放链路 |
+
+`vendor/hongguo.cjs` 里有红果 App 的搜索接口完整签名（`api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/search/tab/v`，
+sm3 + AesV3 + protobuf + X-Bogus 类加密，签名函数约 60 行），**装了 node 就能直接跑**：
+
+```bash
+cd /tmp && git clone --depth 1 https://github.com/N3urda/hongguoTV && cd hongguoTV
+npm i && node -e "const p=require('./server/vendor/hongguo.cjs'); console.log(p.appSearchPage('奶团子一开口咱家好运来',11,1,20))"
+```
+
+用它可以按**剧名**反查红果 `series_id`，从而给「DataEye 没给 native id」的抖音榜剧补红果详情——
+这是目前唯一不需要登录态的补全路径。
+
+## 12. 登录态到底要不要 / 会不会过期
+
+| 需求 | 登录态 |
+|---|---|
+| 三榜排名、热度、集数、题材、公司、上榜历史 | 不要 |
+| 红果漫剧榜的简介/分集/状态（`jcc_hongguo.py`） | 不要 |
+| DataEye 详情接口（`getPlayletInfoV2` 等，覆盖抖音两榜） | 要 |
+| 抖音原生剧的详情（不走 DataEye） | 不要，但要自己算 `a_bogus` |
+
+小程序 token 一般是**微信会话级**（几天到一个月），过期表现是接口返回 `401 请注册登录`，
+或者详情接口静默返回 `content:null`。脚本侧已支持：
+
+```bash
+python3 jcc_detail.py --token "$JCC_TOKEN"     # 环境变量
+python3 jcc_detail.py --cookie "SESSION=…"
+```
+
+换号/换 token 直接重跑即可，不需要改代码；建议一次跑完整个榜单，别让 token 在 60 部的中途过期。
