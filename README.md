@@ -194,3 +194,109 @@ python3 jcc_rank.py --day 2026-10-25
 动态漫/真人AI 榜（motionComic）：`playCount` 播放总量、`playCountAdd` 播放增量、
 `rankNum` 排名、`listDays` 连续霸榜、`manufacturer` 承制、`producerList` 出品、
 `playletUser` 账号信息（抖音号 / 昵称）。
+
+---
+
+## 9. 详情级采集（jcc_detail.py）
+
+`jcc_rank.py` 输出的是榜单简表；`jcc_detail.py` 把每部剧能拿到的字段全榨干：
+
+```bash
+python3 jcc_detail.py                  # 三榜 + 上榜历史 + 制作团队 + 标签翻译
+python3 jcc_detail.py --no-honor       # 只要宽表（快，省 115 次请求）
+python3 jcc_detail.py --token "xxx"    # 追加剧集详情（见下）
+```
+
+输出 `data/jcc/剧查查三榜详情_<day>.xlsx`，6 个 sheet：
+
+| sheet | 行数 | 说明 |
+|---|---|---|
+| 红果漫剧榜 | 60 | 榜单宽表（30 列） |
+| 3D动态漫榜 | 30 | 含播放量字段（39 列） |
+| AI真人榜 | 30 | 含播放量字段（38 列） |
+| 全部明细 | 121 | 三榜合并（51 列） |
+| 上榜历史 | 115 | 每部剧的历史排名/连续霸榜 |
+| 剧集详情 | 115 | 制作团队等；`--token` 后自动补齐简介等 |
+
+### 9.1 标签 id 翻译（已自动做）
+
+榜单里的 `tags` 是数字 id（如 `17、87、104、59、92、12、95`），字典来自
+`GET /playlet/playletFilterList?isSearch=0`（122 个 value→label，含维度）：
+
+```
+17=系统(主题情节)  87=架空(时代背景)  104=大男主(角色设定)
+59=玄幻仙侠(主题情节)  92=3D漫(短剧类型)  12=古代  95=男频(频道)  96=女频(频道)
+```
+
+输出新增两列：`tags_中文` = 系统、架空、大男主、玄幻仙侠、3D漫、古代、男频；
+`tags_维度` = 主题情节=系统/玄幻仙侠；时代背景=架空/古代；角色设定=大男主；短剧类型=3D漫；频道=男频。
+
+### 9.2 上榜历史（免登录）
+
+`GET /playlet/rankHonor?playletId=&pageId=1&pageSize=60` → 每部剧在各榜的历史名次：
+
+```
+honor_days   = 2                       # 上过榜的天数
+honor_ranks  = 动态漫榜:第15名(2026-10-25)     # 各榜最好名次
+honor_history= 2026-10-25 动态漫榜 第15名；…
+```
+
+type 编码：1 热力 / 2 抖音热播 / 3 快手热播 / 4 漫剧热播 / 5 动态漫 / 6 沙雕漫 / 7 真人AI。
+
+### 9.3 剧集详情（需登录态）
+
+详情接口对**未登录**统一返回 `{"statusCode":200,"content":null}`（不是 401，是权限过滤），
+所以榜单能免登录拿，详情不行。接口清单：
+
+```
+/playlet/getPlayletInfoV2              基础详情：简介/题材/集数/上线/平台/出品
+/playlet/topData                       top 数据
+/playlet/getPlayletRankData            6 类统计（明确返回 401 请注册登录）
+/playlet/audienceAnalysis              受众分析
+/playlet/makingTeam                    制作团队（免登录可用，见下）
+/playlet/listTrendByPlaylet            素材投放趋势
+/playlet/listProductDistribution       投放剧场分布
+/playlet/listPublisherDistribution     投放公司分布
+/playletTitbits/selectByPlayletId      花絮
+```
+
+`--token` 接受三种来源（脚本会同时塞到 `token` / `Authorization` 头）：
+
+```bash
+python3 jcc_detail.py --token "$JCC_TOKEN"
+python3 jcc_detail.py --cookie "SESSION=…; …"
+JCC_TOKEN=xxx python3 jcc_detail.py
+```
+
+**取 token 的办法**
+
+1. **真机抓包（最省事）**：`pip3 install mitmproxy && mitmdump -p 8080 -w wx.flow`，
+   手机 Wi-Fi 代理指向电脑 8080，装并信任 mitmproxy 证书，微信里打开剧查查小程序翻一次榜单；
+   `mitmdump -nr wx.flow "~d dataeye.com" -w wx_dEYE.flow` 过滤后看请求头里的 `token` / `Cookie`。
+2. **微信开发者工具**：导入小程序码包，Network 面板找 `/login/loginUser` 之后的请求头。
+   小程序登录是 `GET /login/loginUser?appType=…&code=…`（code 由 `wx.login` 产生，只能用一次）。
+3. **网页端与会话**：Web 端（adxray）登录态是 `userKey`，两套后端不通用，小程序要它自己的 token。
+
+目前实测：**制作团队（makingTeam）免登录可拿**，115 部里 17 部有数据（含配音/演员 `synthespian`、
+`celebrityId`）；其余详情字段卡在登录墙。
+
+### 9.4 字段字典（宽表 51 列里的重点）
+
+| 列 | 含义 |
+|---|---|
+| `_rank_pos` / `ranking` | 榜内名次 |
+| `hotValue` / `hotValueText` | 红果热度（数值 / 原文“8602万”） |
+| `playCount` / `playCountAdd` | 抖音播放总量 / 播放增量（动态漫、真人AI 榜有） |
+| `totalEpisode` | 集数 |
+| `tags_中文` / `tags_维度` | 题材标签（已翻译，带维度） |
+| `playletTags` | 平台侧标签原文 |
+| `producerCompany` / `producerList` | 出品方 |
+| `contractorCompany` / `contractorList` | 承制方 |
+| `copyrightHolderCompany` / `copyrightHolderList` | 版权方 |
+| `platformList` | 播出平台 |
+| `relatedPartyCompany` | 关联方（如“番茄”） |
+| `playletUser` | 抖音号：昵称 / 账号 / userId |
+| `playletNativeId` | 红果站内剧 id（可直接拼红果链接） |
+| `listDays` | 连续霸榜天数 |
+| `playletOnlineTime` / `releaseStartDate` | 上线时间 |
+| `honor_days` / `honor_ranks` / `honor_history` | 上榜历史 |
